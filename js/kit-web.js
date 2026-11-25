@@ -64,7 +64,7 @@ export function coarsePointer() {
 // (`kitVersion`), and the page warns when the two differ (a project that
 // bumped the crates' tag without syncing these files, or the reverse).
 // scripts/check.sh keeps it equal to Cargo.toml's.
-export const KIT_VERSION = '0.1.1';
+export const KIT_VERSION = '0.1.2';
 
 // Shows or hides `element`: its `hidden` attribute, and an inline
 // `display: none` while hidden. The attribute alone loses to any rule that

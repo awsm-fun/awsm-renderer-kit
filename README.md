@@ -199,8 +199,8 @@ unstored.
 
 ```toml
 [dependencies]
-awsm-renderer-settings = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.1", features = ["renderer", "scene"] }
-awsm-renderer-stats = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.1", features = ["renderer"] }
+awsm-renderer-settings = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.2", features = ["renderer", "scene"] }
+awsm-renderer-stats = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.2", features = ["renderer"] }
 
 # While iterating on the kit next to the project:
 [patch."https://github.com/awsm-fun/awsm-renderer-kit"]
@@ -238,7 +238,7 @@ tag's tarball and run its script (a shallow `git clone --branch <tag>` of an
 annotated tag prints "… is not a commit!" warnings):
 
 ```sh
-tag=v0.1.1   # the tag in renderer/Cargo.toml
+tag=v0.1.2   # the tag in renderer/Cargo.toml
 tmp=$(mktemp -d)
 curl -sL "https://codeload.github.com/awsm-fun/awsm-renderer-kit/tar.gz/refs/tags/$tag" | tar -xz -C "$tmp"
 "$tmp"/awsm-renderer-kit-*/scripts/sync-js.sh . --check
@@ -246,9 +246,13 @@ curl -sL "https://codeload.github.com/awsm-fun/awsm-renderer-kit/tar.gz/refs/tag
 
 ## How to adopt
 
-The pilot, `templates/simple-multithreaded-c`, is the worked example for the
-C family. Everything below is what it took there, plus what differs for the
-others.
+Seven projects adopted v0.1.1; each is a worked example of one shape:
+
+| Shape | Project | Look at |
+|---|---|---|
+| JS page, Rust render worker, C app worker | `templates/simple-multithreaded-c` (the pilot), `templates/physics-multithreaded-c`, `games/dreidel-derby` | `renderer/src/render.rs` (`start`, `kit_message`, the frame), `renderer/src/stats.rs` (the app's sections), `dom/runtime/main.js` |
+| Rust page, render worker, shared memory | `templates/physics-multithreaded`, `templates/physics-isaac`, `templates/physics-mujoco` | `main_thread.rs` (the panels), `render_thread.rs` (the collector), `stats.rs` |
+| Rust page, one game worker, no shared memory | `templates/physics-singlethreaded` | `game.rs`, `stats.rs` |
 
 ### Every project
 
@@ -256,124 +260,117 @@ others.
    `AntiAliasingConfig { .. }` literals need `taa: None`; the kit replaces
    most of them anyway). Bump the Basis transcoder cache key if the project
    has one (the vendored files are unchanged in 0.46).
-2. Add the two crates (above). Keep the storage prefix: stored choices carry
-   over (`aa` ids `off`/`smaa`/`msaa` are the same strings; `res_scale` and
-   the stats keys are the same keys). Users who never chose keep the new
-   desktop default, TAA.
-3. Worker: at start, `probe_gpu().await`, then post
-   `SettingsToPage::SettingsOptions(SettingsOptions::new(&config, Some(gpu)))`
-   and `post_report(collector.placeholder())`. Build the renderer with
-   `mode.to_anti_aliasing()` and `stats_logging()`. Before a scene load,
+2. Add the two crates at a tag (above), no `[patch]` in what you commit.
+   Keep the storage prefix: stored choices carry over (`aa` ids
+   `off`/`smaa`/`msaa` are the same strings; `res_scale` and the stats keys
+   are the same keys). Users who never chose get the new desktop default,
+   TAA.
+3. Choose the defaults in one `settings_config()`. Every port offers all
+   seven modes. Isaac and MuJoCo had a fixed MSAA 4× and kept it as the
+   touch default (`AaDefaults { coarse: AaMode::Msaa, .. }`); Dreidel Derby
+   sets `pixel_budget: 2_000_000.0`. Everyone took the software-GPU seed
+   (Isaac and MuJoCo had none before).
+4. The GPU probe and the options:
+   - **Rust page**: the page is the same crate, so it calls `probe_gpu()`
+     itself, then `SettingsPanel::new(.., &SettingsOptions::new(&settings_config(), Some(gpu)), ..)`
+     before it sizes and transfers the canvas. No round trip.
+   - **JS page**: the worker runs `probe_gpu()` at module start and posts
+     `settings-options` (and `post_report(collector.placeholder())`); the
+     page builds `Settings` from it, then sizes the canvas, transfers it and
+     posts `init { …, width, height, aa }`.
+5. Worker: build the renderer with `mode.to_anti_aliasing()` and
+   `stats_logging()`. Before a scene load,
    `scene.post_process.anti_aliasing = scene_anti_aliasing(&renderer.anti_aliasing)`.
-   On an `anti-alias`, take the renderer out of the frame loop and run
+   On `anti-alias`, keep only the latest pick, take the renderer out of the
+   frame loop and run
    `apply_anti_aliasing(.., |e| post_to_page(&SettingsToPage::from(e)))`.
-4. Stats, per frame: `begin_renderer_frame`, `lap` between your phases
-   (only read the clock when `renderer_detail()`), then
+6. Stats, per frame: `begin_renderer_frame`, `lap` between your phases
+   (`skip_lap` over time that is no phase's; read the clock only when
+   `renderer_detail()`), then
    `end_frame(FrameInput { late, interval, paced_skips, ..FrameInput::new(t, cpu_ms) }, &RendererTimings)`;
    on `Some(window)`, build your sections and `post_report(collector.report(&window, sections))`.
    `mark_ready()` with your `ready`, `reset()` when a scene reload starts,
-   `restart()` when the app's own counters restart. Route `stats-view` and
-   `stats-page` to `collector.handle`.
-5. Delete the project's own AA enum, resolution code, `?reset`, GPU probe,
-   compile overlay, stats panel and profiling code.
+   `restart()` when the app's own counters restart.
+7. Messages: dispatch the worker's incoming messages with
+   `SettingsToWorker::from_js` / `StatsToWorker::from_js` before your own
+   enum, and the page's with `SettingsPanel::handle_js` /
+   `StatsPanel::handle_js` (`settings.handleMessage` / `stats.handleMessage`
+   in JS). Each returns "not mine" for anything else, so the kit's
+   `{type: …}` objects live beside an app's own `msg` / `kind` enums.
+8. Delete the project's own AA enum, resolution code, `?reset`, GPU probe,
+   compile overlay, stats panel and profiling code, and its stats atomics or
+   timing-table writes that only the panel read.
 
-### The C family (PMC, DD)
-
-As the pilot did:
+### The C family
 
 - `renderer/web/worker.js`: `init(canvas, baseUrl, width, height, aa)`;
-  forward `anti-alias`, `stats-view` and `stats-page` whole to one
-  `kit(message)` export (`SettingsToWorker::from_js` /
-  `StatsToWorker::from_js` dispatch).
-- The page waits for `settings-options` before it sizes the canvas,
-  transfers it and posts `init` (one message round trip; the worker's wasm
-  load dominates anyway).
+  `anti-alias`, `stats-view` and `stats-page` go whole to one `kit(message)`
+  export.
 - `dom/runtime/settings.js` and `stats.js` are replaced by the synced
   `dom/runtime/kit/`. The static Settings modal, notice and compile overlay
   leave `index.html` (the kit builds them into `#ui` with the same ids and
-  classes); the buttons and `#stats` stay.
-- **Stats move into the render worker.** The page no longer samples the
-  bridge block: the worker builds the C app's group from it (`step_work_us`,
-  `latest_step`, the timing table's `APP_PHASE` entries) as an app section,
-  with a budget lane, and writes `bridge_stats.detail` itself from the open
-  groups (the C app keeps reading it). See the pilot's `renderer/src/stats.rs`
-  and `Bridge::{set_detail, step_work_us, app_timings}`. The renderer's
-  bridge counters (`frame_count`, `gpu_frame_us`, …) are still written, so
-  nothing in `bridge.h` changes; the renderer's own timing-table entries are
-  gone (they are in the report).
+  classes); the buttons and `#stats` stay. PMC and DD added a
+  `dom:kit-check` task (the tag's tarball, `sync-js.sh --check`; see
+  [Syncing the JS twins](#syncing-the-js-twins)).
+- **Stats move into the render worker.** The worker builds the C app's
+  group from the bridge block (`step_work_us`, `latest_step`, the timing
+  table's `APP_PHASE` entries) as an app section with a budget lane, and
+  writes `bridge_stats.detail` itself from the open groups (the C app keeps
+  reading it; the page no longer writes it). `bridge.h`'s layout is
+  unchanged; the renderer's own timing-table entries are gone (they are in
+  the report).
 - **PMC**: a second section `physics` (Box3D stages, solve parts, the
-  thread-count label: set `label` per report) from `PHYSICS_STAGE` /
-  `PHYSICS_SOLVE` entries and `physics_step_us`. The budget had one lane
-  for the app worker's whole step: put `budget_ms` on the app section only,
-  with `.budget_label("app worker (app + Box3D step)")`. The page's game
-  rows ("balls dropped" from `active_poses`) and "last cue" (audio runs on
-  the page) go under the app group with `installStats({ sectionRows })`.
-  The page row is "frame marks + sound cues".
-- **DD**: `ResolutionPolicy { pixel_budget: 2_000_000.0, ..Default::default() }`
-  in the worker's `SettingsConfig`. Its game keys (`muted`, `best`,
-  `learned`) are **not** cleared by `?reset` any more unless registered
-  (`resetSettingsIfAsked({ prefix, extraKeys: [...] })`): register only
-  game *options* (probably `muted`), never the score. The Settings checkbox
-  for stats is an `extraRows` row calling `stats.setOpen`. `settings.open()`
-  serves the title and pause menus; `ui: { escapeStops: true, noticeText: … }`
-  replaces its modal.js patch and notice wording. Its renderer `Pacing`
-  feeds `FrameInput { interval, paced_skips }` (the display group's pacing
-  row and the budget follow). The **auto-tuner**: see
-  [An auto-tuner](#an-auto-tuner): `setAutoScale` / `clearAutoScale` replace
-  its `tune()` internals (`#tunedPixels`, `#scaleFor`, `#forgetTuning`);
-  read GPU ms and the refresh period from `stats.lastReport().summary`
-  instead of the bridge and `measureRefresh`; under TAA modes it should
-  move `set_taa_render_scale` in the worker, not the canvas (a canvas resize
-  resets TAA history) — a small worker message of the game's own.
+  thread-count label set per report). One budget lane for the app worker's
+  whole step: `budget_ms` on the app section only, with
+  `.budget_label("app worker (app + Box3D step)")`. The page's game rows
+  ("balls dropped") and "last cue" (audio runs on the page) go under the
+  app group with `installStats({ sectionRows })`.
+- **DD**: `ui: { escapeStops: true, noticeText: … }` replaces its modal.js
+  patch and notice wording; the Settings checkbox for stats is an
+  `extraRows` row calling `stats.setOpen`; `settings.open()` serves the
+  title and pause menus; its renderer `Pacing` feeds
+  `FrameInput { interval, paced_skips }`. The auto-tuner uses
+  `setAutoScale` / `clearAutoScale` under non-TAA modes and a game message
+  (`taa-scale` → `set_taa_render_scale`) under TAA, reading
+  `stats.lastReport().summary` ([An auto-tuner](#an-auto-tuner)). Its game
+  keys (`muted`, `best`, `learned`) are no longer cleared by `?reset`; pass
+  `extraKeys` to `resetSettingsIfAsked` for any game *option* that should
+  be.
 
 ### The Rust family
 
 - **Page**: `SettingsPanel` and `StatsPanel` are web-sys, no dominator, and
-  build the same DOM the v1 dominator code did (`settings-overlay`,
+  build the DOM the dominator code did (`settings-overlay`,
   `settings-modal`, `settings-row`, `res-slider`, `settings-select`,
-  `stats-group`, …), so the existing inline CSS keeps working. v2 (Isaac,
-  MuJoCo) uses `settings-close` for the × (`SettingsUi { close_class }`) and
-  the hint "Lower the resolution if your framerate is low."; both have a
-  fixed MSAA 4× and no menu: `SettingsConfig { modes: vec![AaMode::Msaa], .. }`
-  and `SettingsUi { show_aa: false, .. }` (or offer the menu now: the kit
-  makes it free). v2 has no software-GPU seed: keep
-  `software_start: None` to stay identical, or adopt it. Give the panels a
-  container element; mount order sets the Tab order as before.
-- A Rust main thread has the config itself: `SettingsOptions::new(&config, None)`
-  and a later `gpu-info` from the worker (`SettingsPanel::handle`), or wait
-  for `settings-options` like the C family.
-- **Messages**: the Rust projects tag their own enums `msg` / `quality` /
-  `resize`. Post the kit's messages as their own objects and dispatch with
-  `SettingsToPage::from_js` / `StatsToPage::from_js` before your own enum
-  (they return `None` for anything not the kit's).
-- **MT (shared memory)**: the collector runs in the render worker and posts
-  `stats` about once a second (measured in the pilot: building a report
-  ≈0.07 ms, serializing and posting ≈0.15 ms with every group open, ~5 KB).
-  The physics worker's figures (step time, late steps, pool split) still
-  live in the `BodyMotion` atomics: read them in the render worker at window
-  close and build the `physics` section there, as the C pilot does with the
-  bridge. Don't lock the renderer's `profiling` tables from the main thread
-  (an `Atomics.wait` trap risk); the collector reads them on the render
-  thread. `RenderMsg::Timings` and the `DETAIL_*` bits go away (the worker
-  knows the open groups).
-- **ST**: one game worker runs renderer and physics: `renderer_label:
-  "renderer (game worker)"`, and either keep `renderer_in_budget` with a
-  physics section that has no `budget_ms`, or put the whole worker in one
-  section. Six phases (`post sound cues`). No COOP/COEP, which the kit does
-  not need.
-- **Your CSS**: the panels hide elements with an inline `display: none`
-  besides `hidden` (see "Showing and hiding"), so the existing
-  `.settings-overlay { display: flex }` rules keep working unchanged.
-- **Isaac**: `poses` section (`samples/s per robot`, late via
-  `FrameInput::late`, dropped stream frames), no budget lane. **MuJoCo**:
-  the sim stats come from the MuJoCo JS worker to the main thread: either
-  forward them to the render worker and build the `sim` section there (it
-  then joins the budget), or use `StatsHooks::app_sections` on the page
-  (no budget lane). `{kind:"profile"}` to the MuJoCo worker follows
-  `stats-view` (the page knows the open groups).
-- **v1 legacy keys**: `SettingsStore::with_legacy_aa_keys("awsm_msaa", "awsm_smaa")`
-  and `migrate_legacy_aa()` once at start; `?reset` clears them too.
-- The About modal's Stats tab is the app's own text: keep it in step with
+  `stats-group`, …), so the inline CSS kept working unchanged (the kit hides
+  with an inline `display: none`, see "Showing and hiding"). The panels go
+  into `body` after the app's own Settings button; mount order sets the
+  Tab order. Isaac and MuJoCo keep their `×` class and hint
+  (`SettingsUi { close_class: "settings-close", hint: … }`).
+- **v1 legacy keys** (MT, ST):
+  `SettingsStore::new(prefix).with_legacy_aa_keys("awsm_msaa", "awsm_smaa")`,
+  then `reset_if_asked()`, then `migrate_legacy_aa()`, once at start.
+- **MT**: the collector runs in the render worker. The physics worker's
+  figures (step time, late steps, pool split) still live in the
+  `BodyMotion` atomics; the render worker reads them at window close and
+  builds the `physics` section (label with the pool size). Don't lock the
+  renderer's `profiling` tables from the main thread (an `Atomics.wait` trap
+  risk). `RenderMsg::Timings` and the `DETAIL_*` bits are gone.
+- **ST**: the collector runs in the one game worker:
+  `renderer_label: "renderer (game worker)"`, `renderer_in_budget: false`,
+  one budget lane for the whole worker on the physics section
+  (`.budget_label(…)`), and the physics steps inside the frame kept out of
+  the renderer's phases with `skip_lap`. No COOP/COEP, which the kit does not
+  need.
+- **Isaac**: a `poses` section from the pose-block counters (samples/s per
+  robot, late via `FrameInput::late`, dropped stream frames), no budget
+  lane.
+- **MuJoCo**: the MuJoCo JS worker still reports `{kind: "stats"}` to the
+  main thread, which forwards it to the render worker (`{kind:
+  "sim-stats"}`); the `sim` section is built there and joins the budget.
+  `{kind: "profile", on}` to the MuJoCo worker follows the panel (sim group
+  open and panel shown).
+- The About modal's Stats tab is each app's own text: keep it in step with
   the group labels.
 
 ## An auto-tuner

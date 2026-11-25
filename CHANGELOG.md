@@ -1,11 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
+
+For the next adopter; the seven projects stay on 0.1.1 (nothing here changes
+their behaviour). Additive only.
 
 - `StatsCollector::skip_lap(now)`: moves the phase clock without charging a
   phase (a single-threaded app's physics steps inside its frame). `lap` with
   an index outside the phases did the same, undocumented; it still does.
-- README: checking a project's synced JS in CI from the tag's tarball.
+- README: checking a project's synced JS in CI from the tag's tarball;
+  "How to adopt" rewritten from what the seven ports actually did.
 
 ## 0.1.1
 
