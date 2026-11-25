@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.1.1
+
+Review fixes, and what the C-family port asked for. No breaking change
+(except for exhaustive struct literals of `StatsHooks` / `StatGroup`).
+
+Fixes:
+- **Panels in the Rust templates' CSS**: the kit hid its overlays and rows
+  with the `hidden` attribute only, which `.settings-overlay { display: flex }`
+  and `.settings-row { display: flex }` override: the Settings modal, the
+  notice and the compile overlay would all have shown at once. Every kit
+  element is now shown and hidden with `hidden` plus an inline
+  `display: none` (`dom::set_shown`, `setShown`).
+- **TAA fallback**: when `set_anti_aliasing` cannot set TAA up, the renderer
+  falls back to MSAA 4× itself and returns the error; `apply_anti_aliasing`
+  skipped the commit then, leaving the fallback's material pipelines
+  uncompiled. It now commits whenever the structure moved.
+- `apply_anti_aliasing` no longer commits for a change that is not
+  structural (between TAA presets): no hitch, as `compiles: false` says.
+- A quick second pick (between TAA presets, which raise no overlay) could
+  move the menu back for a moment when the first pick's `aa-compile-done`
+  arrived: `done` now updates the menu only when it answers the latest
+  `aa-compile-start` for the current pick.
+- JS `Settings.start({ extraRows })` threw without a hint line.
+- The stats panels do no DOM work while hidden (the report is kept and drawn
+  when the panel shows; `lastReport()` stays current).
+
+Added:
+- `StatGroup::budget_label` (`budgetLabel`): a budget lane labelled apart
+  from its group (PMC's "app worker (app + Box3D step)").
+- `StatsHooks::section_rows` / `installStats({ sectionRows })`: page-side
+  rows at the end of an expanded group the worker sent (PMC's game rows and
+  "last cue").
+- An auto-tuner's canvas lever: `ResolutionState::{set_auto_scale,
+  clear_auto_scale, scale_for, is_auto_tuned, dpr, cap}`, and on the panels
+  `is_user_scale` / `isUserScale`, `dpr`, `set_auto_scale` /
+  `setAutoScale`, `clear_auto_scale` / `clearAutoScale` (Dreidel Derby's
+  `tune()` state, without its policy). Fixture-tested in both twins.
+- `KIT_VERSION` in `js/kit-web.js`; `Settings` warns when the worker's kit
+  version differs; `scripts/check.sh` keeps it equal to Cargo.toml's.
+
 ## 0.1.0
 
 First release, for awsm-renderer 0.46.0. Replaces the settings and stats code

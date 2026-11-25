@@ -180,6 +180,10 @@ pub struct ResolutionState {
     user: bool,
     scale: f64,
     max_texture: u32,
+    /// The canvas pixels an app's auto-tuner settled on
+    /// ([`Self::set_auto_scale`]); while set, they replace the pixel budget
+    /// on a resize.
+    tuned_pixels: Option<f64>,
 }
 
 impl ResolutionState {
@@ -203,6 +207,7 @@ impl ResolutionState {
             user: stored.is_some(),
             scale: 1.0,
             max_texture: policy.max_texture,
+            tuned_pixels: None,
         };
         state.scale = match stored {
             Some(scale) => policy.clamp(scale),
@@ -226,6 +231,17 @@ impl ResolutionState {
         self.user
     }
 
+    /// `devicePixelRatio` (at least 1) as of the last resize.
+    pub fn dpr(&self) -> f64 {
+        self.dpr
+    }
+
+    /// The device-class ceiling for a default or tuned scale (the coarse or
+    /// software start, else the policy's maximum).
+    pub fn cap(&self) -> f64 {
+        self.cap
+    }
+
     /// The largest canvas side in effect.
     pub fn max_texture(&self) -> u32 {
         self.max_texture
@@ -246,13 +262,82 @@ impl ResolutionState {
     /// The canvas's layout size or the pixel ratio changed. The default
     /// depends on the size (the pixel budget), so it is worked out again; a
     /// scale the user chose stays.
+    ///
+    /// A scale an auto-tuner set ([`Self::set_auto_scale`]) is kept as its
+    /// canvas pixels: the new size gets the scale with about as many
+    /// ([`Self::scale_for`]). A new pixel ratio (another display: another
+    /// budget, maybe another GPU) forgets them.
     pub fn resized(&mut self, native_w: f64, native_h: f64, dpr: f64) {
+        let dpr = dpr.max(1.0);
+        if dpr != self.dpr {
+            self.tuned_pixels = None;
+        }
         self.native_w = native_w.max(1.0);
         self.native_h = native_h.max(1.0);
-        self.dpr = dpr.max(1.0);
+        self.dpr = dpr;
         if !self.user {
-            self.scale = self.auto_scale();
+            self.scale = match self.tuned_pixels {
+                Some(pixels) => self.scale_for(pixels),
+                None => self.auto_scale(),
+            };
         }
+    }
+
+    /// The scale that gives about `pixels` canvas pixels at the current
+    /// size, within the default's limits: under the device ceiling, on the
+    /// step (rounded down), not below the minimum effective pixel ratio
+    /// (unless the ceiling is), within the range. (Dreidel Derby's
+    /// `#scaleFor`.)
+    pub fn scale_for(&self, pixels: f64) -> f64 {
+        let policy = &self.policy;
+        let fit = (pixels.max(0.0) / (self.native_w * self.native_h)).sqrt();
+        let steps = policy.steps();
+        let stepped = (fit.min(self.cap) * steps).floor() / steps;
+        let floor = policy
+            .min_scale
+            .max((policy.min_effective_dpr / self.dpr).min(self.cap));
+        stepped.max(floor).min(policy.max_scale)
+    }
+
+    /// An app's auto-tuner (one that moves the canvas scale: see
+    /// [`crate::retune_target`]) sets the scale. Ignored while the scale is
+    /// the user's. Clamped to the range and the device ceiling, taken as
+    /// given otherwise (the tuner picks its own step), and remembered as
+    /// canvas pixels for later resizes. Not stored. Returns the scale
+    /// applied, or `None` if nothing changed (a user scale, or the same
+    /// scale).
+    pub fn set_auto_scale(&mut self, scale: f64) -> Option<f64> {
+        if self.user || !scale.is_finite() {
+            return None;
+        }
+        let ceiling = self.cap.min(self.policy.max_scale);
+        let scale = scale.min(ceiling).max(self.policy.min_scale);
+        self.tuned_pixels = Some(self.native_w * self.native_h * scale * scale);
+        if (scale - self.scale).abs() < 1e-9 {
+            return None;
+        }
+        self.scale = scale;
+        Some(scale)
+    }
+
+    /// Forgets the auto-tuner's scale ([`Self::set_auto_scale`]): back to the
+    /// policy's default, unless the scale is the user's (an app calls it
+    /// when the cost per pixel changes, such as on an anti-aliasing change).
+    /// Returns whether the scale changed.
+    pub fn clear_auto_scale(&mut self) -> bool {
+        self.tuned_pixels = None;
+        if self.user {
+            return false;
+        }
+        let auto = self.auto_scale();
+        let changed = (auto - self.scale).abs() >= 1e-9;
+        self.scale = auto;
+        changed
+    }
+
+    /// Whether an auto-tuner's scale is in effect.
+    pub fn is_auto_tuned(&self) -> bool {
+        !self.user && self.tuned_pixels.is_some()
     }
 
     /// The worker's report on the GPU: its largest texture caps the canvas,
@@ -283,6 +368,7 @@ impl ResolutionState {
         };
         self.scale = self.policy.from_percent(percent);
         self.user = true;
+        self.tuned_pixels = None;
         self.scale
     }
 }
@@ -359,6 +445,10 @@ mod tests {
         },
         #[serde(rename_all = "camelCase")]
         Slider { percent: f64 },
+        #[serde(rename_all = "camelCase")]
+        AutoScale { scale: f64, applied: Option<f64> },
+        #[serde(rename_all = "camelCase")]
+        ClearAutoScale { changed: bool },
     }
 
     fn fixture() -> Fixture {
@@ -446,6 +536,17 @@ mod tests {
                     }
                     Step::Slider { percent } => {
                         state.set_percent(percent);
+                    }
+                    Step::AutoScale { scale, applied } => {
+                        let got = state.set_auto_scale(scale);
+                        assert_eq!(
+                            got.map(|s| (s * 1e9).round()),
+                            applied.map(|s| (s * 1e9).round()),
+                            "{at}: applied"
+                        );
+                    }
+                    Step::ClearAutoScale { changed } => {
+                        assert_eq!(state.clear_auto_scale(), changed, "{at}: changed");
                     }
                 }
             }

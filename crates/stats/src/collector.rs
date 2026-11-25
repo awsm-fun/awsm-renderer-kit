@@ -807,7 +807,8 @@ impl StatsCollector {
         for section in app {
             if let Some(ms) = section.budget_ms {
                 let lane = section.lane.clone().unwrap_or_else(|| "sim".into());
-                lanes.push((section.label.clone(), ms, lane));
+                let label = section.budget_label.as_ref().unwrap_or(&section.label);
+                lanes.push((label.clone(), ms, lane));
             }
         }
         if let Some(ms) = self.page {
@@ -1230,6 +1231,21 @@ mod tests {
         assert_eq!(report.budget.rows[0].value, "4.0 / 16.7 ms (24%)");
         assert_eq!(report.budget.rows[4].value, "7.0 ms");
         assert_eq!(report.summary.gpu_ms, Some(4.0));
+
+        // A lane labelled apart from its group (a thread two sections share).
+        let section = SectionSpec::new("app", "app (C, app worker)", Some("sim"))
+            .group()
+            .budget_ms(Some(1.0))
+            .budget_label("app worker (app + Box3D step)");
+        let report = stats.report(&w, vec![section]);
+        assert_eq!(report.budget.rows[2].label, "app worker (app + Box3D step)");
+        assert_eq!(report.app[0].label, "app (C, app worker)");
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            wire["app"][0]["budgetLabel"],
+            "app worker (app + Box3D step)"
+        );
+        assert!(wire["gpu"].get("budgetLabel").is_none());
     }
 
     #[test]

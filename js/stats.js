@@ -20,7 +20,7 @@
 // default, and a stored "open" is only honoured on a desktop) and
 // `stats_open_<group>` (expanded groups; collapsed by default).
 
-import { coarsePointer, el, storeBool, storedBool } from './kit-web.js';
+import { coarsePointer, el, setShown, storeBool, storedBool } from './kit-web.js';
 
 // The worker → page message types this module handles.
 export const STATS_TYPES = ['stats'];
@@ -78,8 +78,12 @@ function rowElement({ label, value, depth = 0, bad = false, lane = null, share =
 //   onHelp       opens an explanation of the panel ("what do these mean?"),
 //                or null for no such button
 //   pagePart     the name of the page's work in the page group
-//   appSections  () => [section]: groups only the page knows, shown after
-//                the worker's app sections (they do not join the budget)
+//   appSections  (report) => [section]: groups only the page knows, shown
+//                after the worker's app sections (they do not join the budget)
+//   sectionRows  (groupId, report) => [row]: rows only the page knows, added
+//                to the end of a group the worker sent (game rows, "last
+//                cue"); called for expanded groups only. A row is
+//                { label, value, depth?, bad? }
 //   shown        the panel's initial state; default: the stored choice,
 //                never on a touch device
 //
@@ -94,6 +98,7 @@ export function installStats({
   onHelp = null,
   pagePart = 'page',
   appSections = () => [],
+  sectionRows = null,
   shown = null,
 }) {
   const storageKey = `${prefix}stats`;
@@ -110,7 +115,8 @@ export function installStats({
   let report = null;
 
   const openIds = () => [...parts.values()].filter((part) => part.open).map((part) => part.id);
-  const publishView = () => post({ type: 'stats-view', shown: !panel.hidden, open: openIds() });
+  const isOpen = () => !panel.hidden;
+  const publishView = () => post({ type: 'stats-view', shown: isOpen(), open: openIds() });
 
   function part(group) {
     let existing = parts.get(group.id);
@@ -128,7 +134,7 @@ export function installStats({
     existing = { id: group.id, open: false, header, label, arrow, headline, rows, look: null };
     const setOpen = (open) => {
       existing.open = open;
-      rows.hidden = !open;
+      setShown(rows, open);
       header.setAttribute('aria-expanded', String(open));
       arrow.textContent = open ? '▾ ' : '▸ ';
     };
@@ -155,12 +161,18 @@ export function installStats({
     }
     showValue(view.headline, group.headline);
     view.header.classList.toggle('stats-bad', Boolean(group.bad));
-    if (view.open) view.rows.replaceChildren(...(group.rows ?? []).map(rowElement));
+    if (view.open) {
+      const extra = sectionRows?.(group.id, report) ?? [];
+      view.rows.replaceChildren(...[...(group.rows ?? []), ...extra].map(rowElement));
+    }
     return view;
   }
 
   function render(next) {
     report = next;
+    // Hidden: nothing to draw (the report still arrives each second, for
+    // lastReport()); it is drawn when the panel shows.
+    if (!isOpen()) return;
     const groups = [
       next.budget,
       next.display,
@@ -193,13 +205,14 @@ export function installStats({
   // stored "open" is only honoured on a desktop; on a touch device the
   // button still opens it for the session.
   const setOpen = (open) => {
-    panel.hidden = !open;
+    setShown(panel, open);
     button?.classList.toggle('active', open);
     publishView();
+    if (open && report) render(report);
   };
   setOpen(shown ?? (!coarsePointer() && storedBool(storageKey) === true));
   button?.addEventListener('click', () => {
-    const open = panel.hidden;
+    const open = !isOpen();
     setOpen(open);
     storeBool(storageKey, open);
   });
@@ -251,7 +264,7 @@ export function installStats({
       setOpen(open);
       storeBool(storageKey, open);
     },
-    isOpen: () => !panel.hidden,
+    isOpen,
     // The latest report (its `summary` holds the raw figures: refreshMs,
     // fps, cpuMs, gpuMs, pageMs, frameInterval).
     lastReport: () => report,

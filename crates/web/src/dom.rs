@@ -67,9 +67,31 @@ pub fn on_with_capture(
     closure.forget();
 }
 
+/// Shows or hides `element`: its `hidden` attribute, and an inline
+/// `display: none` while hidden. The attribute alone loses to any author
+/// rule that sets `display` (the Rust templates' `.settings-overlay {
+/// display: flex }`, `.settings-row { display: flex }`), so the inline
+/// style is what really hides it; showing removes it again, so the
+/// stylesheet's own `display` applies. Every kit element is shown and
+/// hidden through this (and `js/kit-web.js`'s `setShown`).
+pub fn set_shown(element: &HtmlElement, shown: bool) {
+    element.set_hidden(!shown);
+    let style = element.style();
+    if shown {
+        let _ = style.remove_property("display");
+    } else {
+        let _ = style.set_property("display", "none");
+    }
+}
+
+/// Whether `element` is shown (by [`set_shown`]).
+pub fn is_shown(element: &HtmlElement) -> bool {
+    !element.hidden()
+}
+
 /// The behaviour every kit overlay shares (the twin of the C family's
-/// `modal.js` and `js/kit-web.js`'s `modal()`): `open()` / `close()` by the
-/// `hidden` attribute. A dismissable overlay also closes on any of its
+/// `modal.js` and `js/kit-web.js`'s `modal()`): `open()` / `close()` by
+/// [`set_shown`]. A dismissable overlay also closes on any of its
 /// `[data-close]` buttons, on a click on the backdrop itself (not on the card
 /// in it) and on Escape. Keys pressed inside the overlay stay inside it
 /// (except Escape), so a page that sends keys to a game from a window
@@ -93,7 +115,7 @@ pub struct ModalOptions {
 impl Modal {
     /// Wires up `overlay` (hidden until opened).
     pub fn new(overlay: HtmlElement, options: ModalOptions) -> Self {
-        overlay.set_hidden(true);
+        set_shown(&overlay, false);
         on(&overlay, "keydown", |event| {
             let escape = event
                 .dyn_ref::<web_sys::KeyboardEvent>()
@@ -107,7 +129,7 @@ impl Modal {
                 for index in 0..buttons.length() {
                     if let Some(button) = buttons.item(index) {
                         let overlay = overlay.clone();
-                        on(&button, "click", move |_| overlay.set_hidden(true));
+                        on(&button, "click", move |_| set_shown(&overlay, false));
                     }
                 }
             }
@@ -115,7 +137,7 @@ impl Modal {
             on(&overlay, "click", move |event| {
                 let target: Option<JsValue> = event.target().map(Into::into);
                 if target.as_ref() == Some(backdrop.as_ref()) {
-                    backdrop.set_hidden(true);
+                    set_shown(&backdrop, false);
                 }
             });
             if let Some(window) = web_sys::window() {
@@ -124,8 +146,8 @@ impl Modal {
                     let escape = event
                         .dyn_ref::<web_sys::KeyboardEvent>()
                         .is_some_and(|key| key.key() == "Escape");
-                    if escape && !overlay.hidden() {
-                        overlay.set_hidden(true);
+                    if escape && is_shown(&overlay) {
+                        set_shown(&overlay, false);
                         if options.escape_stops {
                             event.stop_immediate_propagation();
                         }
@@ -137,14 +159,14 @@ impl Modal {
     }
 
     pub fn open(&self) {
-        self.overlay.set_hidden(false);
+        set_shown(&self.overlay, true);
     }
 
     pub fn close(&self) {
-        self.overlay.set_hidden(true);
+        set_shown(&self.overlay, false);
     }
 
     pub fn is_open(&self) -> bool {
-        !self.overlay.hidden()
+        is_shown(&self.overlay)
     }
 }

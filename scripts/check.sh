@@ -18,6 +18,13 @@ if [ -z "${CC_wasm32_unknown_unknown:-}" ]; then
 fi
 wasm="--target wasm32-unknown-unknown"
 
+echo "== versions (Cargo.toml, js/kit-web.js)"
+cargo_version=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"$/\1/p;}' Cargo.toml)
+js_version=$(sed -n "s/^export const KIT_VERSION = '\(.*\)';$/\1/p" js/kit-web.js)
+if [ "$cargo_version" != "$js_version" ]; then
+  echo "Cargo.toml is $cargo_version but js/kit-web.js's KIT_VERSION is $js_version" >&2
+  exit 1
+fi
 echo "== fmt"
 cargo fmt --all --check
 echo "== cargo test (native)"

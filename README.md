@@ -14,6 +14,7 @@ Built for awsm-renderer **0.46.0**. MIT OR Apache-2.0.
 
 Contents: [The shape](#the-shape) · [API](#api) · [Protocol](#protocol) ·
 [Depending on it](#depending-on-it) · [How to adopt](#how-to-adopt) ·
+[An auto-tuner](#an-auto-tuner) ·
 [TAA and the resolution setting](#taa-and-the-resolution-setting) ·
 [Decisions](#decisions) · [Working on the kit](#working-on-the-kit)
 
@@ -66,7 +67,7 @@ Core:
 | `DeviceClass { coarse, software }` | |
 | `SettingsConfig { modes, defaults, resolution }` | `Default` = all seven modes, the defaults above, the shared policy; `offers`, `parse`, `default_for`, `initial_aa(device, stored, url) -> (AaMode, AaSource)` |
 | `ResolutionPolicy` | `min_scale` 0.5, `max_scale` 1.0, `step` 0.05, `pixel_budget` 2.8 MP, `min_effective_dpr` 1, `coarse_start` 0.6, `software_start` `Some(0.5)`, `max_texture` 8192; `cap`, `auto_scale`, `default_scale(css_w, css_h, dpr, device)`, `backing_size(native_w, native_h, scale, max_texture)`, `parse_stored` / `format_stored` (`"0.80"`), `percent`, `from_percent` |
-| `ResolutionState` | the page's state: `new`, `resized`, `gpu_info`, `set_percent`, `backing`, `scale`, `percent`, `is_user`, `auto_scale` |
+| `ResolutionState` | the page's state: `new`, `resized`, `gpu_info`, `set_percent`, `backing`, `scale`, `percent`, `is_user`, `auto_scale`, `dpr`, `cap`; for an app's auto-tuner `set_auto_scale`, `clear_auto_scale`, `scale_for`, `is_auto_tuned` ([below](#an-auto-tuner)) |
 | `migrate_legacy_aa(msaa, smaa)` | the Rust v1 projects' pre-0.42 `awsm_msaa` / `awsm_smaa` keys, as they migrated them |
 | `show_quality_notice(device, stored_scale, stored_aa)` | |
 | `retune_target(mode) -> RetuneLever { CanvasScale, TaaRenderScale }` | which lever an auto-tuner moves |
@@ -77,7 +78,7 @@ Core:
 | Item | |
 |---|---|
 | `AaMode::to_anti_aliasing()` / `AaMode::from_anti_aliasing(&AntiAliasing)` | the renderer's constructors (`none`, `smaa`, `msaa4`, `taa(TaaConfig::native() / preset(..))`); back to the closest mode |
-| `apply_anti_aliasing(renderer, mode, on_event) -> Result<(), String>` | `set_anti_aliasing`, then `commit_load` with `LoadingStats::phase_label()` as progress; `on_event(AaCompileEvent::{Start {mode, compiles}, Progress {message}, Done {ok, error, mode, taa_fallback}})`, `Done` always. `SettingsToPage::from(event)` is the message |
+| `apply_anti_aliasing(renderer, mode, on_event) -> Result<(), String>` | `set_anti_aliasing`, then `commit_load` with `LoadingStats::phase_label()` as progress when the structure changed (none between TAA presets; also after the renderer's own TAA → MSAA fallback, whose pipelines need it); `on_event(AaCompileEvent::{Start {mode, compiles}, Progress {message}, Done {ok, error, mode, taa_fallback}})`, `Done` always. `SettingsToPage::from(event)` is the message |
 | `probe_gpu() -> GpuInfo` | the worker's own lightweight `requestAdapter`: `is_fallback`, `max_texture_dim` |
 | `post_to_page(&msg)` | serialize and post from a dedicated worker |
 | `SettingsToWorker::from_js(&JsValue)` | `None` for a message that is not the kit's |
@@ -96,7 +97,8 @@ before `load_scene_for_player`).
 `ui` feature: `SettingsPanel::new(container, canvas, store, &options, SettingsUi, log)`,
 `.start(canvas, SettingsHooks { on_resize, on_anti_alias, open_button, extra_rows })`,
 `.backing()`, `.aa()`, `.scale()`, `.open()`, `.close()`, `.ready()`,
-`.handle(&SettingsToPage)`, `.handle_js(&JsValue) -> bool`. `SettingsUi`
+`.handle(&SettingsToPage)`, `.handle_js(&JsValue) -> bool`,
+`.is_user_scale()`, `.dpr()`, `.set_auto_scale(scale)`, `.clear_auto_scale()`. `SettingsUi`
 holds the words and knobs (`title`, `hint`, `close_class`, notice and
 overlay text, `show_aa`, `escape_stops`).
 
@@ -115,7 +117,7 @@ Core:
 | `FrameInput { t_ms, cpu_ms, late, interval, paced_skips }` | one presented frame |
 | `Window { seconds, frames, span_ms, late: LateStats }` | `LateStats::row(label)` is the shared "late frames" row |
 | `FrameReport { status, budget, display, gpu, renderer, app, page, summary }` | `groups()` in display order; `summary` has the raw `refresh_ms`, `fps`, `cpu_ms`, `gpu_ms`, `page_ms`, `frame_interval` for a governor |
-| `StatGroup` (= `AppSection`) | `id`, `label`, `lane`, `headline`, `bad`, `rows`, `budget_ms` (joins the frame budget); builder methods |
+| `StatGroup` (= `AppSection`) | `id`, `label`, `lane`, `headline`, `bad`, `rows`, `budget_ms` (joins the frame budget), `budget_label` (the lane's label when not the group's, e.g. one lane for a thread two sections share); builder methods |
 | `StatRow` | `label`, `value` (the display string), `depth`, `bad`, `lane` + `share` (a budget bar) |
 | `TimingSource` | the renderer's running totals (`()` = none) |
 | helpers | `format::{duration, per_frame, per_step, tenths, share, ordinal, fixed, value_pieces}`, `step_headline`, `frame_headline`, `duration_row`, `Smoother`, `NamedMeans`, `RefreshEstimator`, the constants (`EMA_ALPHA`, `WARMUP_FRAMES`, `GAP_MS`, `MIN/MAX_WINDOW_MS`, `LATE_WINDOWS`, …) |
@@ -126,7 +128,8 @@ Core:
 renderer group), `stats_logging()` (build with it: GPU `Frame` tier),
 `post_report(report)`.
 
-`ui` feature: `StatsPanel::mount(prefix, panel, button, StatsHooks { post, on_help, page_part, app_sections, shown })`,
+`ui` feature: `StatsPanel::mount(prefix, panel, button, StatsHooks { post, on_help, page_part, app_sections, section_rows, shown })`
+(`section_rows(group_id, &report) -> Vec<StatRow>`: page-side rows added to the end of an expanded group the worker sent),
 `.handle(&StatsToPage)`, `.handle_js(&JsValue)`, `.page_frame(ms, part, count_frame)`,
 `.set_open(bool)`, `.is_open()`, `.last_report()`.
 
@@ -142,8 +145,9 @@ settings.backing(); settings.aa(); settings.scale();
 settings.start({ onResize({ width, height }), onAntiAlias(id), openButton, extraRows: () => [els] });
 settings.handleMessage(msg);   // → true for the kit's settings messages
 settings.ready(); settings.open(); settings.close();
+settings.isUserScale(); settings.dpr(); settings.setAutoScale(scale); settings.clearAutoScale();
 
-const stats = installStats({ prefix, panel, button, post, onHelp, pagePart, appSections, shown });
+const stats = installStats({ prefix, panel, button, post, onHelp, pagePart, appSections, sectionRows, shown });
 stats.handleMessage(msg);      // → true for `stats`
 stats.pageFrame(ms, part, { frame });
 stats.setOpen(open); stats.isOpen(); stats.lastReport();
@@ -151,7 +155,18 @@ stats.setOpen(open); stats.isOpen(); stats.lastReport();
 
 `settings.js` also exports the policy functions (`ResolutionState`,
 `autoScale`, `defaultScale`, `backingSize`, `initialAa`, …) and
-`SETTINGS_UI`, the default words.
+`SETTINGS_UI`, the default words. `kit-web.js` exports `KIT_VERSION`;
+`Settings` warns in the console when the worker's `kitVersion` (in
+`settings-options`) differs, i.e. when the crates' tag and the synced JS
+are out of step.
+
+**Showing and hiding.** Every element the kit shows and hides (overlays,
+the anti-aliasing row, the stats panel and its groups' rows) gets the
+`hidden` attribute *and* an inline `display: none`, removed again when shown
+(`setShown` / `dom::set_shown`). The attribute alone loses to an app rule
+such as `.settings-overlay { display: flex }`, which the Rust templates
+have. An app that shows or hides a kit element itself should do the same,
+or call the kit (`open()`, `close()`, `setOpen()`).
 
 ## Protocol
 
@@ -184,8 +199,8 @@ unstored.
 
 ```toml
 [dependencies]
-awsm-renderer-settings = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.0", features = ["renderer", "scene"] }
-awsm-renderer-stats = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.0", features = ["renderer"] }
+awsm-renderer-settings = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.1", features = ["renderer", "scene"] }
+awsm-renderer-stats = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.1", features = ["renderer"] }
 
 # While iterating on the kit next to the project:
 [patch."https://github.com/awsm-fun/awsm-renderer-kit"]
@@ -277,10 +292,12 @@ As the pilot did:
   gone (they are in the report).
 - **PMC**: a second section `physics` (Box3D stages, solve parts, the
   thread-count label: set `label` per report) from `PHYSICS_STAGE` /
-  `PHYSICS_SOLVE` entries and `physics_step_us`; the app section adds
-  `gameRows` ("balls dropped" from `active_poses`) and "last cue". The last
-  cue is page-side (audio runs on the page): pass it with `appSections` or
-  send it to the worker. The page row is "frame marks + sound cues".
+  `PHYSICS_SOLVE` entries and `physics_step_us`. The budget had one lane
+  for the app worker's whole step: put `budget_ms` on the app section only,
+  with `.budget_label("app worker (app + Box3D step)")`. The page's game
+  rows ("balls dropped" from `active_poses`) and "last cue" (audio runs on
+  the page) go under the app group with `installStats({ sectionRows })`.
+  The page row is "frame marks + sound cues".
 - **DD**: `ResolutionPolicy { pixel_budget: 2_000_000.0, ..Default::default() }`
   in the worker's `SettingsConfig`. Its game keys (`muted`, `best`,
   `learned`) are **not** cleared by `?reset` any more unless registered
@@ -290,11 +307,13 @@ As the pilot did:
   serves the title and pause menus; `ui: { escapeStops: true, noticeText: … }`
   replaces its modal.js patch and notice wording. Its renderer `Pacing`
   feeds `FrameInput { interval, paced_skips }` (the display group's pacing
-  row and the budget follow). The **auto-tuner**: read GPU ms and the
-  refresh period from `stats.lastReport().summary` instead of the bridge
-  and `measureRefresh`; under TAA modes (`retune_target`) it should move
-  `set_taa_render_scale` in the worker, not the canvas (a canvas resize
-  resets TAA history) — that needs a small worker message of the game's own.
+  row and the budget follow). The **auto-tuner**: see
+  [An auto-tuner](#an-auto-tuner): `setAutoScale` / `clearAutoScale` replace
+  its `tune()` internals (`#tunedPixels`, `#scaleFor`, `#forgetTuning`);
+  read GPU ms and the refresh period from `stats.lastReport().summary`
+  instead of the bridge and `measureRefresh`; under TAA modes it should
+  move `set_taa_render_scale` in the worker, not the canvas (a canvas resize
+  resets TAA history) — a small worker message of the game's own.
 
 ### The Rust family
 
@@ -331,6 +350,9 @@ As the pilot did:
   physics section that has no `budget_ms`, or put the whole worker in one
   section. Six phases (`post sound cues`). No COOP/COEP, which the kit does
   not need.
+- **Your CSS**: the panels hide elements with an inline `display: none`
+  besides `hidden` (see "Showing and hiding"), so the existing
+  `.settings-overlay { display: flex }` rules keep working unchanged.
 - **Isaac**: `poses` section (`samples/s per robot`, late via
   `FrameInput::late`, dropped stream frames), no budget lane. **MuJoCo**:
   the sim stats come from the MuJoCo JS worker to the main thread: either
@@ -342,6 +364,25 @@ As the pilot did:
   and `migrate_legacy_aa()` once at start; `?reset` clears them too.
 - The About modal's Stats tab is the app's own text: keep it in step with
   the group labels.
+
+## An auto-tuner
+
+An app that adjusts the resolution itself (Dreidel Derby's GPU auto-tuner)
+asks `retune_target(mode)` which lever applies:
+
+- **`CanvasScale`** (no TAA): `settings.setAutoScale(scale)` /
+  `SettingsPanel::set_auto_scale`. Ignored while the scale is the user's
+  (`isUserScale()`); clamped to the range and the device ceiling and taken
+  as given otherwise (the tuner keeps its own stepping and floors);
+  remembered as **canvas pixels**, so a window resize keeps about as many
+  (`scaleFor`, rounded down to the step, not below the minimum effective
+  pixel ratio); forgotten on a new pixel ratio (another display) and when
+  the user moves the slider; never stored. `clearAutoScale()` goes back to
+  the policy's default (call it when the cost per pixel changes, e.g. on an
+  anti-aliasing change). Feed the tuner from `stats.lastReport().summary`
+  (`gpuMs`, `fps`, `refreshMs`, `frameInterval`).
+- **`TaaRenderScale`** (TAA): `AwsmRenderer::set_taa_render_scale` in the
+  worker, through a message of the app's own (below).
 
 ## TAA and the resolution setting
 

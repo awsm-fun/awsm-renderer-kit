@@ -63,9 +63,13 @@ pub struct StatGroup {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rows: Vec<StatRow>,
     /// An app section's time per frame drawn (ms): a lane of the frame
-    /// budget, labelled with the section's label.
+    /// budget, labelled with the section's label (or `budget_label`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_ms: Option<f64>,
+    /// The budget lane's label when it is not the group's (one lane for a
+    /// thread that two sections share: `"app worker (app + Box3D step)"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_label: Option<String>,
 }
 
 /// An app's section: a group like any other.
@@ -108,6 +112,12 @@ impl StatGroup {
     /// Joins the frame budget with this time per frame.
     pub fn budget_ms(mut self, ms: Option<f64>) -> Self {
         self.budget_ms = ms;
+        self
+    }
+
+    /// Labels this section's budget lane (default: the group's label).
+    pub fn budget_label(mut self, label: impl Into<String>) -> Self {
+        self.budget_label = Some(label.into());
         self
     }
 }

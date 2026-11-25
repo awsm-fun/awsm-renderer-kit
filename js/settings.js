@@ -25,7 +25,19 @@
 // mode id). `?reset` forgets them (and the stats panel's); `?aa=<id>` picks a
 // mode for this session without storing it.
 
-import { coarsePointer, el, modal, queryGet, queryHas, storageGet, storageKeys, storageRemove, storageSet } from './kit-web.js';
+import {
+  KIT_VERSION,
+  coarsePointer,
+  el,
+  modal,
+  queryGet,
+  queryHas,
+  setShown,
+  storageGet,
+  storageKeys,
+  storageRemove,
+  storageSet,
+} from './kit-web.js';
 
 // The worker → page message types this module handles.
 export const SETTINGS_TYPES = [
@@ -126,6 +138,7 @@ export class ResolutionState {
   #user;
   #scale;
   #maxTexture;
+  #tunedPixels = null;
 
   // `stored`: the stored scale or null (a stored scale is the user's and is
   // never overridden).
@@ -152,6 +165,20 @@ export class ResolutionState {
     return this.#user;
   }
 
+  get dpr() {
+    return this.#dpr;
+  }
+
+  // The device-class ceiling for a default or tuned scale.
+  get cap() {
+    return this.#cap;
+  }
+
+  // Whether an auto-tuner's scale is in effect.
+  isAutoTuned() {
+    return !this.#user && this.#tunedPixels !== null;
+  }
+
   autoScale() {
     return autoScale(this.#policy, this.#nativeW, this.#nativeH, this.#dpr, this.#cap);
   }
@@ -161,12 +188,52 @@ export class ResolutionState {
   }
 
   // The canvas's layout size or the pixel ratio changed: the default is
-  // worked out again; a scale the user chose stays.
+  // worked out again; a scale the user chose stays. An auto-tuner's scale is
+  // kept as its canvas pixels (scaleFor); a new pixel ratio forgets them.
   resized(nativeW, nativeH, dpr) {
+    const ratio = Math.max(dpr, 1);
+    if (ratio !== this.#dpr) this.#tunedPixels = null;
     this.#nativeW = Math.max(nativeW, 1);
     this.#nativeH = Math.max(nativeH, 1);
-    this.#dpr = Math.max(dpr, 1);
-    if (!this.#user) this.#scale = this.autoScale();
+    this.#dpr = ratio;
+    if (!this.#user) {
+      this.#scale = this.#tunedPixels === null ? this.autoScale() : this.scaleFor(this.#tunedPixels);
+    }
+  }
+
+  // The scale that gives about `pixels` canvas pixels at the current size,
+  // within the default's limits (Dreidel Derby's #scaleFor).
+  scaleFor(pixels) {
+    const policy = this.#policy;
+    const fit = Math.sqrt(Math.max(pixels, 0) / (this.#nativeW * this.#nativeH));
+    const steps = Math.max(Math.round(1 / policy.step), 1);
+    const stepped = Math.floor(Math.min(fit, this.#cap) * steps) / steps;
+    const floor = Math.max(policy.minScale, Math.min(policy.minEffectiveDpr / this.#dpr, this.#cap));
+    return Math.min(Math.max(stepped, floor), policy.maxScale);
+  }
+
+  // An app's auto-tuner sets the scale: ignored for a user scale, clamped to
+  // the range and the device ceiling, remembered as canvas pixels. Returns
+  // the scale applied, or null if nothing changed.
+  setAutoScale(scale) {
+    if (this.#user || !Number.isFinite(scale)) return null;
+    const ceiling = Math.min(this.#cap, this.#policy.maxScale);
+    const next = Math.max(Math.min(scale, ceiling), this.#policy.minScale);
+    this.#tunedPixels = this.#nativeW * this.#nativeH * next * next;
+    if (Math.abs(next - this.#scale) < 1e-9) return null;
+    this.#scale = next;
+    return next;
+  }
+
+  // Forgets the auto-tuner's scale: back to the default unless the scale is
+  // the user's. Returns whether the scale changed.
+  clearAutoScale() {
+    this.#tunedPixels = null;
+    if (this.#user) return false;
+    const auto = this.autoScale();
+    const changed = Math.abs(auto - this.#scale) >= 1e-9;
+    this.#scale = auto;
+    return changed;
   }
 
   // The worker's GPU report: its largest texture caps the canvas, and a
@@ -188,6 +255,7 @@ export class ResolutionState {
   setPercent(pct) {
     this.#scale = clampScale(this.#policy, (pct || 100) / 100);
     this.#user = true;
+    this.#tunedPixels = null;
     return this.#scale;
   }
 }
@@ -243,6 +311,12 @@ export class Settings {
   #device;
   #resolution;
   #aa;
+  // The mode of the latest `aa-compile-start`. A `done` says what runs only
+  // when that start was for the current pick: otherwise it answers an older
+  // one (a quick second pick between TAA presets, which raise no overlay),
+  // the newer one follows, and showing it would move the menu back for a
+  // moment. (Workers coalesce picks, so starts and picks need not pair up.)
+  #started = null;
   #showQualityNotice;
   #onResize = () => {};
   #onAntiAlias = () => {};
@@ -273,6 +347,12 @@ export class Settings {
     this.#options = options;
     this.#ui = { ...SETTINGS_UI, ...ui };
     this.#log = log;
+    if (options.kitVersion && options.kitVersion !== KIT_VERSION) {
+      console.warn(
+        `awsm-renderer-kit: the worker is kit ${options.kitVersion}, these page files are ${KIT_VERSION}; ` +
+          "sync them (the kit's scripts/sync-js.sh)",
+      );
+    }
     const policy = options.resolution;
     this.#device = { coarse: coarsePointer(), software: Boolean(options.gpu?.isFallback) };
 
@@ -323,6 +403,41 @@ export class Settings {
     return this.#resolution.scale;
   }
 
+  // Whether the resolution scale is the user's (stored, or set with the
+  // slider). An auto-tuner never moves it.
+  isUserScale() {
+    return this.#resolution.isUser();
+  }
+
+  // devicePixelRatio (at least 1) as of the last resize.
+  dpr() {
+    return this.#resolution.dpr;
+  }
+
+  // An app's auto-tuner sets the canvas scale (under a mode whose lever is
+  // the canvas; under TAA move the renderer's TAA render scale instead):
+  // ignored for a user scale, clamped, remembered as canvas pixels across
+  // resizes, never stored. Shows it and calls onResize. Returns the scale
+  // applied, or null if nothing changed.
+  setAutoScale(scale) {
+    const applied = this.#resolution.setAutoScale(scale);
+    if (applied !== null) {
+      this.#showScale();
+      this.#onResize(this.backing());
+    }
+    return applied;
+  }
+
+  // Forgets the auto-tuner's scale: back to the policy's default unless the
+  // scale is the user's (call it when the cost per pixel changes, such as an
+  // anti-aliasing change).
+  clearAutoScale() {
+    if (this.#resolution.clearAutoScale()) {
+      this.#showScale();
+      this.#onResize(this.backing());
+    }
+  }
+
   // Starts following the canvas size and the Settings controls.
   //   onResize({ width, height })  every new backing-store size
   //   onAntiAlias(id)              every mode the user picks
@@ -334,7 +449,11 @@ export class Settings {
     this.#onAntiAlias = onAntiAlias ?? (() => {});
     if (extraRows) {
       const hint = this.#settings.overlay.querySelector('.settings-hint');
-      for (const row of extraRows()) hint.before(row);
+      const card = this.#settings.overlay.querySelector('.settings-modal');
+      for (const row of extraRows()) {
+        if (hint) hint.before(row);
+        else card.append(row);
+      }
     }
     openButton?.addEventListener('click', () => this.open());
 
@@ -390,6 +509,7 @@ export class Settings {
         this.#gpuInfo(msg, true);
         return true;
       case 'aa-compile-start':
+        this.#started = msg.mode;
         this.#compilingLine.textContent = msg.label ?? msg.mode;
         if (msg.compiles !== false) this.#compiling.open();
         return true;
@@ -399,9 +519,9 @@ export class Settings {
       case 'aa-compile-done':
         this.#compiling.close();
         if (msg.taaFallback) this.#taaUnavailable(msg.taaFallback);
-        // What runs now (MSAA after a TAA fallback). Not stored: the user's
-        // choice stays theirs.
-        if (msg.mode && msg.mode !== this.#aa) {
+        // What runs now (MSAA after a TAA fallback), once it answers the
+        // latest pick. Not stored: the user's choice stays theirs.
+        if (this.#started === this.#aa && msg.mode && msg.mode !== this.#aa) {
           this.#aa = msg.mode;
           this.#aaSelect.value = msg.mode;
           this.#showMode();
@@ -474,7 +594,7 @@ export class Settings {
       this.#aaSelect.append(option);
     }
     aaRow.append(aaLabel, this.#aaSelect);
-    aaRow.hidden = !ui.showAa;
+    setShown(aaRow, ui.showAa);
     card.append(aaRow);
 
     if (ui.hint) card.append(el('p', 'settings-hint', ui.hint));

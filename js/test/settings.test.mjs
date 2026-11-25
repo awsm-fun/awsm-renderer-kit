@@ -56,6 +56,14 @@ test('state sequences match the fixture', () => {
         assert.equal(state.gpuInfo(step), step.lowered, `${at} lowered`);
       } else if (step.do === 'slider') {
         state.setPercent(step.percent);
+      } else if (step.do === 'autoScale') {
+        const applied = state.setAutoScale(step.scale);
+        if (step.applied === null) assert.equal(applied, null, `${at} applied`);
+        else close(applied, step.applied, `${at} applied`);
+      } else if (step.do === 'clearAutoScale') {
+        assert.equal(state.clearAutoScale(), step.changed, `${at} changed`);
+      } else {
+        assert.fail(`${at}: unknown step ${step.do}`);
       }
     });
   }

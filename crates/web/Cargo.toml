@@ -17,6 +17,7 @@ js-sys.workspace = true
 workspace = true
 features = [
     "console",
+    "CssStyleDeclaration",
     "DedicatedWorkerGlobalScope",
     "Document",
     "DomTokenList",

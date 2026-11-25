@@ -92,6 +92,14 @@ pub fn start() {
             on_help: Some(Box::new(|| record("help", JsValue::NULL))),
             page_part: "harness frame".into(),
             app_sections: None,
+            // A page-side row under the app's group, as the C family adds.
+            section_rows: Some(Box::new(|id, _| {
+                if id == "app" {
+                    vec![StatRow::new("page row", "3 balls")]
+                } else {
+                    Vec::new()
+                }
+            })),
             shown: None,
         },
     );

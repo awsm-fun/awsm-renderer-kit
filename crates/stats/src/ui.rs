@@ -13,7 +13,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use awsm_renderer_kit_web::dom::{append, attr, el, el_text, on};
+use awsm_renderer_kit_web::dom::{append, attr, el, el_text, is_shown, on, set_shown};
 use awsm_renderer_kit_web::{coarse_pointer, storage};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -26,6 +26,10 @@ use crate::{
 
 /// Builds page-side app sections from a report.
 pub type SectionsHook = Box<dyn Fn(&FrameReport) -> Vec<AppSection>>;
+
+/// Page-side rows for a group the worker sent: `(group id, report)` → rows
+/// appended after the worker's. Called only for expanded groups.
+pub type SectionRowsHook = Box<dyn Fn(&str, &FrameReport) -> Vec<StatRow>>;
 
 /// A self-rescheduling animation-frame callback.
 type FrameLoop = Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>;
@@ -46,6 +50,11 @@ pub struct StatsHooks {
     /// (a MuJoCo worker's sim stats reaching the page directly). They do not
     /// join the frame budget; give the worker the numbers for that.
     pub app_sections: Option<SectionsHook>,
+    /// Rows only the page knows, added to the end of a group the worker
+    /// sent (the C family's game rows and "last cue" under the app's group).
+    /// Called for expanded groups only, on every report. Hooks must not call
+    /// back into the panel.
+    pub section_rows: Option<SectionRowsHook>,
     /// The panel's initial state; `None`: the stored choice, never on a
     /// touch device.
     pub shown: Option<bool>,
@@ -69,6 +78,7 @@ struct Inner {
     post: Box<dyn Fn(&StatsToWorker)>,
     page_part: String,
     app_sections: Option<SectionsHook>,
+    section_rows: Option<SectionRowsHook>,
     groups: Vec<GroupView>,
     order: Vec<String>,
     report: Option<FrameReport>,
@@ -109,6 +119,7 @@ impl StatsPanel {
                 post: hooks.post,
                 page_part: hooks.page_part,
                 app_sections: hooks.app_sections,
+                section_rows: hooks.section_rows,
                 groups: Vec::new(),
                 order: Vec::new(),
                 report: None,
@@ -181,7 +192,7 @@ impl StatsPanel {
     }
 
     pub fn is_open(&self) -> bool {
-        !self.inner.borrow().panel.hidden()
+        is_shown(&self.inner.borrow().panel)
     }
 
     /// The latest report (its `summary` holds the raw figures).
@@ -190,21 +201,26 @@ impl StatsPanel {
     }
 
     fn show(&self, open: bool) {
-        {
+        let report = {
             let inner = self.inner.borrow();
-            inner.panel.set_hidden(!open);
+            set_shown(&inner.panel, open);
             if let Some(button) = &inner.button {
                 let _ = button.class_list().toggle_with_force("active", open);
             }
-        }
+            inner.report.clone()
+        };
         self.publish_view();
+        // A hidden panel only keeps the latest report: show it now.
+        if let (true, Some(report)) = (open, report) {
+            self.render(report);
+        }
     }
 
     fn publish_view(&self) {
         let message = {
             let inner = self.inner.borrow();
             StatsToWorker::StatsView {
-                shown: !inner.panel.hidden(),
+                shown: is_shown(&inner.panel),
                 open: inner
                     .groups
                     .iter()
@@ -218,11 +234,17 @@ impl StatsPanel {
     }
 
     fn render(&self, report: FrameReport) {
+        // Hidden: nothing to draw (the report still arrives each second, for
+        // `last_report`); it is drawn when the panel shows.
+        if !self.is_open() {
+            self.inner.borrow_mut().report = Some(report);
+            return;
+        }
         let extra = {
             let inner = self.inner.borrow();
             inner.app_sections.as_ref().map(|f| f(&report))
         };
-        let groups: Vec<StatGroup> = [
+        let mut groups: Vec<StatGroup> = [
             report.budget.clone(),
             report.display.clone(),
             report.gpu.clone(),
@@ -234,22 +256,45 @@ impl StatsPanel {
         .chain(std::iter::once(report.page.clone()))
         .collect();
 
+        // Every group's view (a new one brings its stored open state).
         let mut created = false;
+        let open: Vec<bool> = {
+            let mut inner = self.inner.borrow_mut();
+            groups
+                .iter()
+                .map(
+                    |group| match inner.groups.iter().find(|g| g.id == group.id) {
+                        Some(view) => view.open,
+                        None => {
+                            created = true;
+                            let prefix = inner.prefix.clone();
+                            let view = self.group_view(&prefix, &group.id);
+                            let open = view.open;
+                            inner.groups.push(view);
+                            open
+                        }
+                    },
+                )
+                .collect()
+        };
+        // The page's own rows, for the expanded groups.
+        {
+            let inner = self.inner.borrow();
+            if let Some(hook) = &inner.section_rows {
+                for (group, _) in groups.iter_mut().zip(&open).filter(|(_, open)| **open) {
+                    let rows = hook(&group.id, &report);
+                    group.rows.extend(rows);
+                }
+            }
+        }
+
         {
             let mut inner = self.inner.borrow_mut();
             inner.report = Some(report);
             for group in &groups {
-                let index = match inner.groups.iter().position(|g| g.id == group.id) {
-                    Some(index) => index,
-                    None => {
-                        created = true;
-                        let prefix = inner.prefix.clone();
-                        let view = self.group_view(&prefix, &group.id);
-                        inner.groups.push(view);
-                        inner.groups.len() - 1
-                    }
-                };
-                show_group(&mut inner.groups[index], group);
+                if let Some(view) = inner.groups.iter_mut().find(|g| g.id == group.id) {
+                    show_group(view, group);
+                }
             }
             let ids: Vec<String> = groups.iter().map(|g| g.id.clone()).collect();
             // Only re-append when the order changed: moving a focused header
@@ -380,7 +425,7 @@ impl StatsPanel {
 }
 
 fn set_open(view: &GroupView, open: bool) {
-    view.rows.set_hidden(!open);
+    set_shown(&view.rows, open);
     attr(
         &view.header,
         "aria-expanded",

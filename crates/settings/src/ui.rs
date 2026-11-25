@@ -15,7 +15,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use awsm_renderer_kit_web::coarse_pointer;
-use awsm_renderer_kit_web::dom::{append, attr, el, el_text, on, Modal, ModalOptions};
+use awsm_renderer_kit_web::dom::{append, attr, el, el_text, on, set_shown, Modal, ModalOptions};
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSelectElement};
 
@@ -97,6 +97,13 @@ struct Inner {
     config: SettingsConfig,
     resolution: ResolutionState,
     aa: AaMode,
+    /// The mode of the latest `aa-compile-start`. A `done` says what runs
+    /// only when that start was for the current pick: otherwise it answers
+    /// an older one (a quick second pick between TAA presets, which raise no
+    /// overlay), the newer one follows, and showing it would move the menu
+    /// back for a moment. (Workers coalesce picks, so starts and picks need
+    /// not pair up.)
+    started: Option<AaMode>,
     show_notice: bool,
     log: Rc<dyn Fn(&str)>,
     dom: Dom,
@@ -175,6 +182,7 @@ impl SettingsPanel {
                 config,
                 resolution,
                 aa,
+                started: None,
                 show_notice,
                 log,
                 dom,
@@ -197,6 +205,56 @@ impl SettingsPanel {
     /// The resolution scale in effect.
     pub fn scale(&self) -> f64 {
         self.inner.borrow().resolution.scale()
+    }
+
+    /// Whether the resolution scale is the user's (stored, or set with the
+    /// slider). An auto-tuner never moves it.
+    pub fn is_user_scale(&self) -> bool {
+        self.inner.borrow().resolution.is_user()
+    }
+
+    /// `devicePixelRatio` (at least 1) as of the last resize.
+    pub fn dpr(&self) -> f64 {
+        self.inner.borrow().resolution.dpr()
+    }
+
+    /// An app's auto-tuner sets the canvas scale (under a mode whose
+    /// [`crate::retune_target`] is `CanvasScale`; under TAA move
+    /// `set_taa_render_scale` in the worker instead). See
+    /// [`ResolutionState::set_auto_scale`]: ignored for a user scale,
+    /// clamped, remembered as canvas pixels across resizes, never stored.
+    /// Shows it and calls `on_resize`. Returns the scale applied, `None` if
+    /// nothing changed.
+    pub fn set_auto_scale(&self, scale: f64) -> Option<f64> {
+        let applied = {
+            let mut inner = self.inner.borrow_mut();
+            let applied = inner.resolution.set_auto_scale(scale);
+            if applied.is_some() {
+                inner.show_scale();
+            }
+            applied
+        };
+        if applied.is_some() {
+            self.emit_resize();
+        }
+        applied
+    }
+
+    /// Forgets the auto-tuner's scale: back to the policy's default unless
+    /// the scale is the user's (call it when the cost per pixel changes,
+    /// such as an anti-aliasing change).
+    pub fn clear_auto_scale(&self) {
+        let changed = {
+            let mut inner = self.inner.borrow_mut();
+            let changed = inner.resolution.clear_auto_scale();
+            if changed {
+                inner.show_scale();
+            }
+            changed
+        };
+        if changed {
+            self.emit_resize();
+        }
     }
 
     /// Starts following the canvas size and the controls.
@@ -296,9 +354,12 @@ impl SettingsPanel {
             SettingsToPage::SettingsOptions(_) => {}
             SettingsToPage::GpuInfo(info) => self.gpu_info(info),
             SettingsToPage::AaCompileStart {
-                label, compiles, ..
+                mode,
+                label,
+                compiles,
             } => {
-                let inner = self.inner.borrow();
+                let mut inner = self.inner.borrow_mut();
+                inner.started = Some(*mode);
                 inner.dom.compiling_line.set_text_content(Some(label));
                 if *compiles {
                     inner.dom.compiling.open();
@@ -316,8 +377,10 @@ impl SettingsPanel {
                 if let Some(reason) = taa_fallback {
                     inner.taa_unavailable(reason);
                 }
-                // What runs now (MSAA after a TAA fallback). Not stored.
-                if *mode != inner.aa {
+                // What runs now (MSAA after a TAA fallback), once it is the
+                // answer to the latest pick. Not stored: the choice stays
+                // the user's.
+                if inner.started == Some(inner.aa) && *mode != inner.aa {
                     inner.aa = *mode;
                     inner.dom.aa_select.set_value(mode.id());
                     inner.show_mode();
@@ -457,7 +520,7 @@ fn build(
     }
     append(&aa_row, &aa_label);
     append(&aa_row, &aa_select);
-    aa_row.set_hidden(!ui.show_aa);
+    set_shown(&aa_row, ui.show_aa);
     append(&card, &aa_row);
 
     let hint = ui.hint.as_ref().map(|hint| {
