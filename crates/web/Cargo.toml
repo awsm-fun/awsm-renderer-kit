@@ -1,0 +1,38 @@
+[package]
+name = "awsm-renderer-kit-web"
+description = "Internal browser helpers shared by awsm-renderer-settings and awsm-renderer-stats (localStorage, URL flags, postMessage, DOM)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde-wasm-bindgen.workspace = true
+wasm-bindgen.workspace = true
+js-sys.workspace = true
+
+[dependencies.web-sys]
+workspace = true
+features = [
+    "console",
+    "DedicatedWorkerGlobalScope",
+    "Document",
+    "DomTokenList",
+    "Element",
+    "Event",
+    "EventTarget",
+    "HtmlElement",
+    "KeyboardEvent",
+    "Location",
+    "MediaQueryList",
+    "Node",
+    "NodeList",
+    "Performance",
+    "Storage",
+    "UrlSearchParams",
+    "Window",
+    "Worker",
+    "WorkerGlobalScope",
+]

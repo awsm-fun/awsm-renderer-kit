@@ -1,0 +1,66 @@
+[package]
+name = "awsm-renderer-settings"
+description = "Shared graphics settings for awsm-renderer apps: anti-aliasing modes (with TAA), the resolution policy, storage, the worker/page protocol and a web-sys settings panel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+# Worker side: applies a mode to an `AwsmRenderer` (`apply_anti_aliasing`),
+# probes the GPU (`probe_gpu`), posts the protocol to the page.
+renderer = ["dep:awsm-renderer", "dep:awsm-renderer-kit-web", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys"]
+# `scene_anti_aliasing`: the renderer's mode as a scene file's
+# `post_process.anti_aliasing`, so a scene load keeps the app's choice.
+scene = ["renderer", "dep:awsm-renderer-scene"]
+# Page side: `SettingsStore` (localStorage, `?reset`, `?aa=`), the canvas
+# resize observer.
+web = ["dep:awsm-renderer-kit-web", "dep:wasm-bindgen", "dep:js-sys", "dep:web-sys"]
+# The web-sys settings panel (`SettingsPanel`): no framework.
+ui = ["web"]
+
+[dependencies]
+serde.workspace = true
+
+awsm-renderer = { workspace = true, optional = true }
+awsm-renderer-scene = { workspace = true, optional = true }
+awsm-renderer-kit-web = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+
+[dependencies.web-sys]
+workspace = true
+optional = true
+features = [
+    "console",
+    "Document",
+    "DomRect",
+    "DomRectReadOnly",
+    "Element",
+    "Event",
+    "EventTarget",
+    "Gpu",
+    "GpuAdapter",
+    "GpuAdapterInfo",
+    "GpuSupportedLimits",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlLabelElement",
+    "HtmlOptionElement",
+    "HtmlSelectElement",
+    "Navigator",
+    "ResizeObserver",
+    "ResizeObserverBoxOptions",
+    "ResizeObserverEntry",
+    "ResizeObserverOptions",
+    "ResizeObserverSize",
+    "Window",
+    "WorkerGlobalScope",
+    "WorkerNavigator",
+]
+
+[dev-dependencies]
+serde_json.workspace = true

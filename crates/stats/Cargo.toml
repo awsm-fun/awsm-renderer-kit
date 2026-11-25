@@ -1,0 +1,41 @@
+[package]
+name = "awsm-renderer-stats"
+description = "Shared stats for awsm-renderer apps: a worker-side collector (windows, EMA, refresh rate, renderer CPU/GPU timings), a serde FrameReport with app sections, and a web-sys panel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+# Worker side: reads awsm-renderer's profiling, switches its CPU timing tier
+# with the panel, posts reports to the page.
+renderer = ["dep:awsm-renderer", "dep:awsm-renderer-kit-web", "dep:wasm-bindgen", "dep:js-sys", "dep:web-sys"]
+# Page side: messages from and to the worker as JS values.
+web = ["dep:awsm-renderer-kit-web", "dep:wasm-bindgen", "dep:js-sys", "dep:web-sys"]
+# The web-sys stats panel (`StatsPanel`): no framework.
+ui = ["web"]
+
+[dependencies]
+serde.workspace = true
+
+awsm-renderer = { workspace = true, optional = true }
+awsm-renderer-kit-web = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+
+[dependencies.web-sys]
+workspace = true
+optional = true
+features = [
+    "CssStyleDeclaration",
+    "Document",
+    "DomTokenList",
+    "Element",
+    "Event",
+    "HtmlElement",
+    "Window",
+]
+
+[dev-dependencies]
+serde_json.workspace = true

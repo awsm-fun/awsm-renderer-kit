@@ -1,0 +1,10 @@
+# web-sys keeps its WebGPU bindings behind this cfg, and awsm-renderer cannot
+# compile without them. Every consumer sets the same flag in its own
+# .cargo/config.toml (see README, "How to adopt"). An environment RUSTFLAGS
+# REPLACES this list: add the cfg to it when you set one.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg=web_sys_unstable_apis"]
+
+# The same on native, so `cargo test` and editor tooling agree with wasm.
+[target.'cfg(not(target_arch = "wasm32"))']
+rustflags = ["--cfg=web_sys_unstable_apis"]
