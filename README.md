@@ -199,8 +199,8 @@ unstored.
 
 ```toml
 [dependencies]
-awsm-renderer-settings = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.2", features = ["renderer", "scene"] }
-awsm-renderer-stats = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.2", features = ["renderer"] }
+awsm-renderer-settings = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.3", features = ["renderer", "scene"] }
+awsm-renderer-stats = { git = "https://github.com/awsm-fun/awsm-renderer-kit", tag = "v0.1.3", features = ["renderer"] }
 
 # While iterating on the kit next to the project:
 [patch."https://github.com/awsm-fun/awsm-renderer-kit"]
@@ -238,7 +238,7 @@ tag's tarball and run its script (a shallow `git clone --branch <tag>` of an
 annotated tag prints "… is not a commit!" warnings):
 
 ```sh
-tag=v0.1.2   # the tag in renderer/Cargo.toml
+tag=v0.1.3   # the tag in renderer/Cargo.toml
 tmp=$(mktemp -d)
 curl -sL "https://codeload.github.com/awsm-fun/awsm-renderer-kit/tar.gz/refs/tags/$tag" | tar -xz -C "$tmp"
 "$tmp"/awsm-renderer-kit-*/scripts/sync-js.sh . --check

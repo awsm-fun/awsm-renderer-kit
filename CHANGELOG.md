@@ -1,9 +1,18 @@
 # Changelog
 
+## 0.1.3
+
+- **The renderer's CPU timing tier follows the panel without overriding the
+  app.** `begin_renderer_frame` used to force the tier to `Off` whenever the
+  renderer group was closed, which switched off an app's own CPU tracing
+  (a `?trace=` flag, a debug toggle). It now remembers the app's tier,
+  raises it to at least `SubFrame` while the group is open, and restores it
+  when the group closes. A tier the app changes mid-session is adopted.
+  Unit-tested natively (`tier.rs`).
+
 ## 0.1.2
 
-For the next adopter; the seven projects stay on 0.1.1 (nothing here changes
-their behaviour). Additive only.
+Additive only.
 
 - `StatsCollector::skip_lap(now)`: moves the phase clock without charging a
   phase (a single-threaded app's physics steps inside its frame). `lap` with

@@ -314,6 +314,11 @@ pub struct StatsCollector {
     late_total: u64,
     late_windows: u32,
     app: Smoother,
+
+    /// The renderer's CPU timing tier: the app's own, raised while the
+    /// renderer group is open (`renderer` feature).
+    #[cfg_attr(not(feature = "renderer"), allow(dead_code))]
+    pub(crate) cpu_tier: crate::tier::TierFollower,
 }
 
 impl StatsCollector {
@@ -354,6 +359,7 @@ impl StatsCollector {
             missed_total: 0,
             late_total: 0,
             late_windows: 0,
+            cpu_tier: crate::tier::TierFollower::default(),
             app: Smoother::default(),
         }
     }

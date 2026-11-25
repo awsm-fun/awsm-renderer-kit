@@ -24,6 +24,7 @@ pub mod format;
 mod protocol;
 mod refresh;
 mod report;
+mod tier;
 
 #[cfg(feature = "renderer")]
 mod renderer;

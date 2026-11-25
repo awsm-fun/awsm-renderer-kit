@@ -63,18 +63,37 @@ impl TimingSource for RendererTimings {
 
 impl StatsCollector {
     /// [`StatsCollector::begin_frame`], plus the renderer's CPU timing tier:
-    /// `SubFrame` while the renderer group is open (every pass, hook, prep
-    /// and submit scope), `Off` otherwise.
+    /// at least `SubFrame` while the renderer group is open (every pass,
+    /// hook, prep and submit scope). Closing the group restores the app's own
+    /// tier (whatever it set, e.g. from a `?trace=` flag; `Off` by default)
+    /// rather than switching timing off.
     pub fn begin_renderer_frame(&mut self, renderer: &mut AwsmRenderer, now_ms: f64) {
-        let tier = if self.renderer_detail() {
-            TimingTier::SubFrame
-        } else {
-            TimingTier::Off
-        };
+        let current = tier_rank(renderer.logging.cpu);
+        let detail = self.renderer_detail();
+        let tier = rank_tier(
+            self.cpu_tier
+                .next(current, detail, tier_rank(TimingTier::SubFrame)),
+        );
         if renderer.logging.cpu != tier {
             renderer.logging.cpu = tier;
         }
         self.begin_frame(now_ms);
+    }
+}
+
+fn tier_rank(tier: TimingTier) -> u8 {
+    match tier {
+        TimingTier::Off => 0,
+        TimingTier::Frame => 1,
+        TimingTier::SubFrame => 2,
+    }
+}
+
+fn rank_tier(rank: u8) -> TimingTier {
+    match rank {
+        0 => TimingTier::Off,
+        1 => TimingTier::Frame,
+        _ => TimingTier::SubFrame,
     }
 }
 
