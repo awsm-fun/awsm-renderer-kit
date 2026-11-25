@@ -193,7 +193,7 @@ pub fn observe_canvas(canvas: &HtmlCanvasElement, mut on_size: impl FnMut(Canvas
             dpr,
         };
         let boxes = entry.device_pixel_content_box_size();
-        if let Some(device) = boxes.get(0).dyn_into::<web_sys::ResizeObserverSize>().ok() {
+        if let Ok(device) = boxes.get(0).dyn_into::<web_sys::ResizeObserverSize>() {
             let (w, h) = (device.inline_size(), device.block_size());
             if (w - size.native_w).abs() < 2.0 && (h - size.native_h).abs() < 2.0 {
                 size.native_w = w.max(1.0);

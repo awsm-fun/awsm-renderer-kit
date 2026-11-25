@@ -2,7 +2,7 @@
 # shares. See README.md.
 [workspace]
 resolver = "2"
-members = ["crates/web", "crates/settings", "crates/stats"]
+members = ["crates/web", "crates/settings", "crates/stats", "examples/ui-harness"]
 
 [workspace.package]
 version = "0.1.0"

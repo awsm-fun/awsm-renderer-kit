@@ -1,0 +1,19 @@
+# A page that mounts the Rust panels (`SettingsPanel`, `StatsPanel`) with an
+# in-page stats collector fed fake frames: no renderer, no worker. For
+# checking the web-sys panels in a browser (scripts/ui-harness.sh).
+[package]
+name = "awsm-renderer-kit-ui-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+awsm-renderer-settings = { path = "../../crates/settings", features = ["ui"] }
+awsm-renderer-stats = { path = "../../crates/stats", features = ["ui"] }
+wasm-bindgen.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = ["Document", "Element", "HtmlCanvasElement", "HtmlElement", "Window"] }

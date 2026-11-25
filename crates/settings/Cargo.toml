@@ -35,6 +35,7 @@ workspace = true
 optional = true
 features = [
     "console",
+    "CssStyleDeclaration",
     "Document",
     "DomRect",
     "DomRectReadOnly",
@@ -50,6 +51,7 @@ features = [
     "HtmlInputElement",
     "HtmlLabelElement",
     "HtmlOptionElement",
+    "HtmlOptionsCollection",
     "HtmlSelectElement",
     "Navigator",
     "ResizeObserver",

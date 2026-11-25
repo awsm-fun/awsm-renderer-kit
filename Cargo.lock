@@ -137,6 +137,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "awsm-renderer-kit-ui-harness"
+version = "0.1.0"
+dependencies = [
+ "awsm-renderer-settings",
+ "awsm-renderer-stats",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "awsm-renderer-kit-web"
 version = "0.1.0"
 dependencies = [

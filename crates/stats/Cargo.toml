@@ -28,6 +28,7 @@ js-sys = { workspace = true, optional = true }
 workspace = true
 optional = true
 features = [
+    "console",
     "CssStyleDeclaration",
     "Document",
     "DomTokenList",

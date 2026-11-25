@@ -46,4 +46,4 @@ pub use report::{AppSection, FrameReport, StatGroup, StatRow, Summary};
 pub use renderer::{post_report, stats_logging, RendererTimings};
 
 #[cfg(feature = "ui")]
-pub use ui::{StatsHooks, StatsPanel};
+pub use ui::{SectionsHook, StatsHooks, StatsPanel};

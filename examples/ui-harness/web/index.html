@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>kit ui harness</title>
+    <!-- style.css: any app's stylesheet for the panels (scripts/ui-harness.sh
+         copies simple-multithreaded-c's when it is next to the kit). -->
+    <link rel="stylesheet" href="style.css" />
+    <script type="module">
+      import init, { compile, ready } from './harness.js';
+      await init();
+      window.harness = { compile, ready };
+    </script>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="ui">
+      <div class="stats" id="stats" hidden></div>
+      <button class="stats-btn" id="stats-btn" type="button">Stats</button>
+      <button class="settings-btn" id="settings-btn" type="button">Settings</button>
+    </div>
+  </body>
+</html>
