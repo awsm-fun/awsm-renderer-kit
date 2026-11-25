@@ -233,6 +233,17 @@ Each copy starts with a header naming the kit version. Never edit the copies;
 re-sync after bumping the kit tag in the project's Cargo.toml, so the worker
 and the page speak the same version.
 
+In a project's CI, without a kit checkout next to it: fetch the pinned
+tag's tarball and run its script (a shallow `git clone --branch <tag>` of an
+annotated tag prints "… is not a commit!" warnings):
+
+```sh
+tag=v0.1.1   # the tag in renderer/Cargo.toml
+tmp=$(mktemp -d)
+curl -sL "https://codeload.github.com/awsm-fun/awsm-renderer-kit/tar.gz/refs/tags/$tag" | tar -xz -C "$tmp"
+"$tmp"/awsm-renderer-kit-*/scripts/sync-js.sh . --check
+```
+
 ## How to adopt
 
 The pilot, `templates/simple-multithreaded-c`, is the worked example for the
