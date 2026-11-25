@@ -109,7 +109,7 @@ Core:
 | Item | |
 |---|---|
 | `StatsCollector::new(StatsConfig)` | the worker-side collector |
-| per frame | `begin_frame(now)`, `lap(phase, now)`, `end_frame(FrameInput, &impl TimingSource) -> Option<Window>`, then `report(&window, app_sections) -> FrameReport` |
+| per frame | `begin_frame(now)`, `lap(phase, now)`, `skip_lap(now)` (time in the frame that is no phase's: a single-threaded app's physics steps), `end_frame(FrameInput, &impl TimingSource) -> Option<Window>`, then `report(&window, app_sections) -> FrameReport` |
 | lifecycle | `mark_ready()` (scene on screen: warm-up starts), `reset()` (scene reload), `restart()` (a new app instance), `placeholder()`; each returns the report to post |
 | from the page | `handle(StatsToWorker)`, `set_view(shown, open)`, `page_sample(gaps, parts, frames)`, `is_open(id)`, `renderer_detail()`, `refresh_ms()` |
 | app figures | `smooth(key, value)`, `smoothed(key)` |

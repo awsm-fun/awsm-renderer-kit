@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `StatsCollector::skip_lap(now)`: moves the phase clock without charging a
+  phase (a single-threaded app's physics steps inside its frame). `lap` with
+  an index outside the phases did the same, undocumented; it still does.
+- README: checking a project's synced JS in CI from the tag's tarball.
+
 ## 0.1.1
 
 Review fixes, and what the C-family port asked for. No breaking change

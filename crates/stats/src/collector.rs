@@ -511,12 +511,22 @@ impl StatsCollector {
 
     /// Charges the time since the last lap (or the frame's start) to
     /// `phase` (an index into [`StatsConfig::phases`]). A no-op while the
-    /// renderer group is collapsed.
+    /// renderer group is collapsed. An index outside the phases charges
+    /// nothing (see [`Self::skip_lap`]).
     pub fn lap(&mut self, phase: usize, now_ms: f64) {
         if let Some(clock) = &mut self.clock {
             if let Some(ms) = clock.ms.get_mut(phase) {
                 *ms += now_ms - clock.t;
             }
+            clock.t = now_ms;
+        }
+    }
+
+    /// Moves the phase clock to `now_ms` without charging any phase: time
+    /// inside the frame that is not the renderer's (a single-threaded app's
+    /// physics steps, which its own section reports).
+    pub fn skip_lap(&mut self, now_ms: f64) {
+        if let Some(clock) = &mut self.clock {
             clock.t = now_ms;
         }
     }
@@ -1392,6 +1402,25 @@ mod tests {
             .find(|r| r.label == "Geometry")
             .unwrap();
         assert_eq!(geometry.value, "0.50 ms / frame");
+    }
+
+    #[test]
+    fn skip_lap_charges_no_phase() {
+        let mut stats = StatsCollector::new(config());
+        stats.set_view(true, vec!["renderer".into()]);
+        stats.begin_frame(100.0);
+        stats.lap(0, 101.0); // read: 1 ms
+        stats.skip_lap(105.0); // 4 ms of physics: nobody's
+        stats.lap(1, 107.0); // render: 2 ms
+        stats.lap(usize::MAX, 108.0); // out of range: nobody's either
+        let clock = stats.clock.as_ref().unwrap();
+        assert_eq!(clock.ms, vec![1.0, 2.0]);
+        assert_eq!(clock.t, 108.0);
+        // Collapsed: no clock, nothing to move.
+        stats.set_view(true, vec![]);
+        stats.begin_frame(200.0);
+        stats.skip_lap(201.0);
+        assert!(stats.clock.is_none());
     }
 
     #[test]
